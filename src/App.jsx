@@ -122,11 +122,11 @@ const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, o
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            {task.tags?.map((tag, idx) => (
-              <span key={idx} className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full text-white", tag.color)}>
-                {tag.name}
+            {task.tag_name && (
+              <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full text-white bg-zinc-400")}>
+                {task.tag_name}
               </span>
-            ))}
+            )}
             {task.priority && <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full", task.priority === 'high' ? 'bg-red-100 text-red-500' : task.priority === 'medium' ? 'bg-amber-100 text-amber-500' : 'bg-blue-100 text-blue-500')}>{task.priority}</span>}
           </div>
 
@@ -485,7 +485,7 @@ const LandingPage = ({ onComplete }) => {
               <div className="space-y-12">
                 <div className="w-20 h-20 bg-accent-green rounded-[32px] flex items-center justify-center mx-auto shadow-xl"><CheckCircle2 size={40} className="text-white" /></div>
                 <h2 className="text-3xl font-bold">Alignment Success</h2>
-                <button onClick={() => onComplete(name)} className="apple-button bg-charcoal text-white px-12 py-5 uppercase font-black text-sm tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl">Enter Workspace</button>
+                <button onClick={() => onComplete(name, workspace)} className="apple-button bg-charcoal text-white px-12 py-5 uppercase font-black text-sm tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl">Enter Workspace</button>
               </div>
             )}
           </motion.div>
@@ -549,7 +549,11 @@ export default function App() {
     if (profileError && profileError.code === 'PGRST116') {
       const { data: newProfile, error: createError } = await supabase
         .from('profiles')
-        .insert([{ id: session.user.id, onboarding_completed: false }])
+        .insert([{ 
+          id: session.user.id, 
+          full_name: session.user.user_metadata?.full_name || '',
+          onboarding_completed: false 
+        }])
         .select()
         .single();
       if (!createError) profileData = newProfile;
@@ -558,6 +562,22 @@ export default function App() {
     setProfile(profileData);
     setUserName(profileData?.full_name || session.user.email.split('@')[0]);
     fetchData(session.user.id);
+
+    // Set up Realtime subscriptions
+    const tasksSubscription = supabase
+      .channel('tasks-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData(session.user.id))
+      .subscribe();
+
+    const subtasksSubscription = supabase
+      .channel('subtasks-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => fetchData(session.user.id))
+      .subscribe();
+
+    return () => {
+      tasksSubscription.unsubscribe();
+      subtasksSubscription.unsubscribe();
+    };
   };
 
   const fetchData = async (userId) => {
@@ -568,30 +588,33 @@ export default function App() {
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
 
-    if (pagesError) console.error('Error fetching pages:', pagesError);
-
     if (!swipePages || swipePages.length === 0) {
-      // Initialize default pages if none exist
-      const { data: newPages, error: initError } = await supabase
+      const { data: newPages } = await supabase
         .from('swipe_pages')
         .insert(DEFAULT_PAGES.map(p => ({ ...p, user_id: userId })))
         .select();
-
-      if (initError) console.error('Error initializing pages:', initError);
-      else swipePages = newPages;
+      swipePages = newPages;
     }
     setPages(swipePages || []);
 
-    // Fetch Tasks & Subtasks
-    const { data: tasksData, error: tasksError } = await supabase
+    // Fetch Tasks & Subtasks separately as per new schema
+    const { data: tasksData } = await supabase
       .from('tasks')
-      .select('*, subtasks:tasks(*)')
+      .select('*')
       .eq('user_id', userId)
-      .is('parent_id', null)
       .order('created_at', { ascending: false });
 
-    if (tasksError) console.error('Error fetching tasks:', tasksError);
-    else setTasks(tasksData || []);
+    const { data: subtasksData } = await supabase
+      .from('subtasks')
+      .select('*')
+      .eq('user_id', userId);
+
+    const tasksWithSubtasks = tasksData?.map(task => ({
+      ...task,
+      subtasks: subtasksData?.filter(s => s.task_id === task.id) || []
+    })) || [];
+
+    setTasks(tasksWithSubtasks);
   };
 
   const activePages = useMemo(() => [
@@ -603,7 +626,7 @@ export default function App() {
     const pageObj = activePages[swipeIndex] || activePages[0];
     const pageName = pageObj.name;
     if (pageName === 'Main') return tasks;
-    return tasks.filter(t => t.tags?.some(tag => tag.name === pageName) || (pageName.includes('Work') && t.tags?.some(tag => tag.name === 'Coding')));
+    return tasks.filter(t => t.tag_name === pageName || (pageName.includes('Work') && t.tag_name === 'Coding'));
   }, [tasks, swipeIndex, activePages]);
 
   const toggleTask = async (id) => {
@@ -624,66 +647,69 @@ export default function App() {
     }
   };
 
-  const toggleSubtask = async (taskId, subId, newTitle = null) => {
-    if (newTitle) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert([{ 
-          title: newTitle, 
-          parent_id: taskId, 
-          user_id: user.id, 
-          is_completed: false 
-        }])
-        .select();
-
-      if (error) {
-        console.error('Error creating subtask:', error);
-      } else if (data) {
-        setTasks(prev => prev.map(t => t.id === taskId ? {
-          ...t,
-          subtasks: [...(t.subtasks || []), data[0]]
-        } : t));
-      }
-      return;
-    }
-
-    setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t,
-      subtasks: t.subtasks.map(s => s.id === subId ? { ...s, is_completed: !s.is_completed } : s)
-    } : t));
-
-    const subtask = tasks.find(t => t.id === taskId)?.subtasks.find(s => s.id === subId);
+  const toggleSubtask = async (taskId, subId) => {
+    const task = tasks.find(t => t.id === taskId);
+    const subtask = task?.subtasks.find(s => s.id === subId);
     if (!subtask) return;
 
+    const newDone = !subtask.is_completed;
+    
+    // Optimistic UI
+    setTasks(prev => prev.map(t => t.id === taskId ? {
+      ...t,
+      subtasks: t.subtasks.map(s => s.id === subId ? { ...s, is_completed: newDone } : s)
+    } : t));
+
     const { error } = await supabase
-      .from('tasks')
-      .update({ is_completed: !subtask.is_completed })
+      .from('subtasks')
+      .update({ is_completed: newDone })
       .eq('id', subId);
 
-    if (error) console.error('Error updating subtask:', error);
+    if (error) {
+      console.error('Error updating subtask:', error);
+      fetchData(session.user.id); // Revert
+    }
+  };
+
+  const addSubtask = async (taskId, title) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    
+    const { data, error } = await supabase
+      .from('subtasks')
+      .insert([{ 
+        title, 
+        task_id: taskId, 
+        user_id: user.id, 
+        is_completed: false 
+      }])
+      .select();
+
+    if (error) console.error('Error creating subtask:', error);
+    else fetchData(user.id);
   };
 
   const addTask = async (taskData) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     
-    const tempId = 'temp-' + Date.now();
-    const optimisticTask = { ...taskData, id: tempId, user_id: user.id, subtasks: [] };
-    setTasks(prev => [optimisticTask, ...prev]);
+    // Standardize task data for new schema
+    const { tags, ...rest } = taskData;
+    const finalTaskData = {
+      ...rest,
+      user_id: user.id,
+      tag_name: tags?.[0]?.name || null // Simplified tag handling for new schema
+    };
 
     const { data, error } = await supabase
       .from('tasks')
-      .insert([{ ...taskData, user_id: user.id }])
-      .select('*, subtasks:tasks(*)');
+      .insert([finalTaskData])
+      .select();
 
     if (error) {
       console.error('Error adding task:', error);
-      setTasks(prev => prev.filter(t => t.id !== tempId));
-    } else if (data) {
-      setTasks(prev => prev.map(t => t.id === tempId ? data[0] : t));
+    } else {
+      fetchData(user.id);
     }
   };
 
@@ -718,19 +744,23 @@ export default function App() {
     else fetchData(user.id);
   };
 
-  const completeOnboarding = async (name) => {
+  const completeOnboarding = async (name, role = 'Personal') => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     const { error } = await supabase
       .from('profiles')
-      .update({ full_name: name, onboarding_completed: true })
+      .update({ 
+        full_name: name, 
+        workspace_role: role,
+        onboarding_completed: true 
+      })
       .eq('id', user.id);
 
     if (error) {
       console.error('Error updating profile:', error);
     } else {
-      setProfile(prev => ({ ...prev, full_name: name, onboarding_completed: true }));
+      setProfile(prev => ({ ...prev, full_name: name, workspace_role: role, onboarding_completed: true }));
       setUserName(name);
     }
   };
