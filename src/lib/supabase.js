@@ -1,20 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Using process.env as requested by the user, and import.meta.env for Vite
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase credentials missing. Ensure .env is configured correctly.');
+  console.warn('Supabase credentials missing. Ensure .env.local is configured correctly with VITE_ or NEXT_PUBLIC_ prefixes.');
 }
 
 export const supabase = createClient(
-  supabaseUrl || 'https://sqdezzxbhrmaztropgwc.supabase.co',
-  supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNxZGV6enhiaHJtYXp0cm9wZ3djIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjAxMjksImV4cCI6MjA5MzAzNjEyOX0.dg0s4tqRY8MGof4fx8_fiSQNkgbT1cw33dnkvW4hbDg',
+  supabaseUrl,
+  supabaseAnonKey,
   {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: true,
+      storageKey: 'mesmer-auth-token', // 'Lock fix' to avoid lock:sb-auth-token errors
     }
   }
 );

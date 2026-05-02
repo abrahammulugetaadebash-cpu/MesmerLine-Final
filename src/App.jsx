@@ -37,7 +37,8 @@ import {
   Shield,
   HelpCircle,
   LogOut,
-  Sliders
+  Sliders,
+  Trash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
@@ -58,6 +59,15 @@ const DEFAULT_PAGES = [
 ];
 
 // --- Helper Functions ---
+const getEthiopianDate = (date) => {
+  const ethMonths = ['Tahsas', 'Tir', 'Yekatit', 'Megabit', 'Miyazia', 'Ginbot', 'Sene', 'Hamle', 'Nehasse', 'Meskerem', 'Tikimt', 'Hidar'];
+  const ethMonthIndex = date.getMonth(); 
+  let ethDay = date.getDate() - 9;
+  if(ethDay <= 0) ethDay += 30; // very rough
+  const ethYear = date.getFullYear() - (date.getMonth() < 8 || (date.getMonth() === 8 && date.getDate() < 11) ? 8 : 7);
+  return `${ethMonths[ethMonthIndex]} ${Math.max(1, ethDay)}, ${ethYear}`;
+};
+
 const getDatesRange = () => {
   const dates = [];
   const today = new Date();
@@ -76,17 +86,20 @@ const getDatesRange = () => {
 
 // --- Components ---
 
-const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, onSelect, onDuplicate }) => {
+const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, onSelect, onDuplicate, onEdit, onDelete }) => {
   const [showOptions, setShowOptions] = useState(false);
-  const isOverdue = !task.is_completed && task.date && new Date(task.date) < new Date(new Date().setHours(0, 0, 0, 0));
-  const isToday = task.date && new Date(task.date).toDateString() === new Date().toDateString();
+  
+  // Logic for the Reddish overdue tint
+  const isOverdue = !task.is_completed && task.due_date && new Date(`${task.due_date} ${task.due_time || '00:00'}`) < new Date();
+  const isToday = task.due_date && new Date(task.due_date).toDateString() === new Date().toDateString();
 
   return (
     <motion.div
       layout
       className={cn(
-        "apple-card p-4 mb-4 relative overflow-hidden transition-all duration-300",
-        task.is_completed ? "bg-emerald-50 border-emerald-100" : isOverdue ? "bg-red-50 border-red-100" : isToday ? "bg-orange-50/30 border-orange-100/50" : "bg-white border-zinc-100",
+        "apple-card p-4 mb-4 relative overflow-hidden transition-all duration-500",
+        // Visual State Sync: Greenish/Darkened when completed, Reddish when overdue
+        task.is_completed ? "bg-emerald-50/80 border-emerald-100 opacity-80" : isOverdue ? "bg-red-50/80 border-red-100" : isToday ? "bg-orange-50/30 border-orange-100/50" : "bg-white border-zinc-100",
         isSelected && "ring-2 ring-charcoal"
       )}
       onClick={() => isSelectMode && onSelect(task.id)}
@@ -102,7 +115,7 @@ const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, o
 
         <div className="flex-1">
           <div className="flex justify-between items-start">
-            <h3 className={cn("text-sm font-bold tracking-tight mb-2", task.is_completed && "line-through text-zinc-400 font-medium")}>{task.title}</h3>
+            <h3 className={cn("text-sm font-bold tracking-tight mb-2 transition-all duration-500", task.is_completed && "line-through text-zinc-400 font-medium")}>{task.title}</h3>
             {!isSelectMode && (
               <div className="relative">
                 <button onClick={(e) => { e.stopPropagation(); setShowOptions(!showOptions); }} className="text-zinc-300 hover:text-zinc-600">
@@ -110,35 +123,45 @@ const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, o
                 </button>
                 <AnimatePresence>
                   {showOptions && (
-                    <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="absolute right-0 top-6 bg-white border border-zinc-100 shadow-xl rounded-xl p-1 z-50 w-32">
-                      <button onClick={(e) => { e.stopPropagation(); onDuplicate(task); setShowOptions(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-50 rounded-lg">
-                        <Copy size={14} /> Duplicate
-                      </button>
-                    </motion.div>
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setShowOptions(false); }} />
+                      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="absolute right-0 top-6 bg-white border border-zinc-100 shadow-xl rounded-xl p-1 z-50 w-32">
+                        <button onClick={(e) => { e.stopPropagation(); onEdit(task); setShowOptions(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-50 rounded-lg">
+                          <CheckSquare size={14} /> Edit
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); onDuplicate(task); setShowOptions(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-50 rounded-lg">
+                          <Copy size={14} /> Duplicate
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); onDelete(task.id); setShowOptions(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-red-500 hover:bg-red-50 rounded-lg">
+                          <Trash size={14} /> Delete
+                        </button>
+                      </motion.div>
+                    </>
                   )}
                 </AnimatePresence>
               </div>
             )}
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 items-center">
             {task.tag_name && (
               <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full text-white bg-zinc-400")}>
                 {task.tag_name}
               </span>
             )}
-            {task.priority && <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full", task.priority === 'high' ? 'bg-red-100 text-red-500' : task.priority === 'medium' ? 'bg-amber-100 text-amber-500' : 'bg-blue-100 text-blue-500')}>{task.priority}</span>}
+            {task.priority && <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full", task.priority.toLowerCase() === 'high' ? 'bg-red-100 text-red-500' : task.priority.toLowerCase() === 'medium' ? 'bg-amber-100 text-amber-500' : 'bg-blue-100 text-blue-500')}>{task.priority}</span>}
+            {task.due_date && <span className="text-[9px] font-bold text-zinc-400 flex items-center gap-1 ml-1"><Clock size={10} /> {task.due_time || 'All Day'}</span>}
           </div>
 
           {task.subtasks?.length > 0 && (
             <div className="mt-4 space-y-3">
               {task.subtasks.map(sub => (
                 <div key={sub.id} className="bg-zinc-50/50 border border-zinc-100 rounded-2xl p-3 flex items-start gap-3 ml-2 relative">
-                  <div className={cn("absolute left-0 top-3 bottom-3 w-0.5 rounded-full", sub.priority === 'high' ? 'bg-red-400' : sub.priority === 'medium' ? 'bg-amber-400' : 'bg-zinc-300')} />
+                  <div className={cn("absolute left-0 top-3 bottom-3 w-0.5 rounded-full", task.priority === 'high' ? 'bg-red-400' : 'bg-zinc-300')} />
                   <button onClick={(e) => { e.stopPropagation(); onToggleSubtask(task.id, sub.id); }} className="mt-0.5">
                     {sub.is_completed ? <CheckCircle2 size={16} className="text-accent-green" /> : <Circle size={16} className="text-zinc-300" />}
                   </button>
-                  <span className={cn("text-xs font-bold", sub.is_completed ? "line-through text-zinc-400 font-medium" : "")}>{sub.title}</span>
+                  <span className={cn("text-xs font-bold transition-all duration-500", sub.is_completed ? "line-through text-zinc-400 font-medium opacity-50" : "")}>{sub.title}</span>
                 </div>
               ))}
             </div>
@@ -155,16 +178,31 @@ const SchedulePage = ({ tasks, riseTime, windDownTime }) => {
   const dates = useMemo(() => getDatesRange(), []);
   const [showCalendar, setShowCalendar] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const carouselRef = useRef(null);
+
+  const handleDateSelect = (date) => {
+    setSelectedDate(date);
+    setShowCalendar(false);
+    if (carouselRef.current) {
+      const weekIdx = Math.floor(dates.findIndex(d => d.toDateString() === date.toDateString()) / 7);
+      if (weekIdx !== -1) {
+        carouselRef.current.scrollTo({ left: weekIdx * carouselRef.current.offsetWidth, behavior: 'smooth' });
+      }
+    }
+  };
 
   const todayTasks = tasks.filter(t => {
-    if (!t.date) return false;
-    const d = new Date(t.date);
+    if (t.recurrence_type === 'Daily') return true;
+    if (!t.due_date) {
+      return selectedDate.toDateString() === new Date().toDateString();
+    }
+    const d = new Date(t.due_date);
     return d.toDateString() === selectedDate.toDateString();
-  }).sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+  }).sort((a, b) => (a.due_time || '00:00').localeCompare(b.due_time || '00:00'));
 
   const timelineItems = [
     { time: riseTime, title: 'Rise & Shine', type: 'anchor' },
-    ...todayTasks.map(t => ({ time: t.time || 'All Day', title: t.title, type: 'task', is_completed: t.is_completed })),
+    ...todayTasks.map(t => ({ time: t.due_time || 'All Day', title: t.title, type: 'task', is_completed: t.is_completed })),
     { time: windDownTime, title: 'Wind Down', type: 'anchor' }
   ].sort((a, b) => a.time.localeCompare(b.time));
 
@@ -172,7 +210,10 @@ const SchedulePage = ({ tasks, riseTime, windDownTime }) => {
     <div className="h-full flex flex-col bg-white">
       <header className="px-6 pt-16 pb-4 flex justify-between items-end border-b border-zinc-50">
         <div>
-          <h1 className="text-[10px] font-black uppercase tracking-[0.3em] text-accent-green mb-0.5">Mesmer</h1>
+          <div className="flex items-center gap-2 mb-0.5">
+            <h1 className="text-[10px] font-black uppercase tracking-[0.3em] text-accent-green">Mesmer</h1>
+            <span className="text-[9px] font-bold text-zinc-400 bg-zinc-50 px-2 py-0.5 rounded-full">{getEthiopianDate(selectedDate)}</span>
+          </div>
           <h2 className="text-3xl font-bold tracking-tight">Schedule</h2>
         </div>
         <div className="relative">
@@ -181,31 +222,38 @@ const SchedulePage = ({ tasks, riseTime, windDownTime }) => {
           </button>
           <AnimatePresence>
             {showCalendar && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute right-0 top-12 bg-white apple-card border border-zinc-100 shadow-2xl p-4 z-[60] w-64">
-                <div className="grid grid-cols-7 gap-1 text-center">
-                  {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => <span key={d} className="text-[8px] font-black text-zinc-300">{d}</span>)}
-                  {Array.from({ length: 31 }).map((_, i) => {
-                    const d = i + 1;
-                    const isToday = d === new Date().getDate();
-                    return (
-                      <button key={i} onClick={() => setShowCalendar(false)} className={cn("h-7 w-7 rounded-lg text-[10px] font-bold flex items-center justify-center", isToday ? "bg-accent-green text-white" : "hover:bg-zinc-50")}>{d}</button>
-                    );
-                  })}
-                </div>
-              </motion.div>
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowCalendar(false)} />
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute right-0 top-12 bg-white apple-card border border-zinc-100 shadow-2xl p-4 z-[60] w-64">
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => <span key={d} className="text-[8px] font-black text-zinc-300">{d}</span>)}
+                    {Array.from({ length: 31 }).map((_, i) => {
+                      const d = i + 1;
+                      const isToday = d === new Date().getDate();
+                      return (
+                        <button key={i} onClick={() => {
+                          const newDate = new Date(selectedDate);
+                          newDate.setDate(d);
+                          handleDateSelect(newDate);
+                        }} className={cn("h-7 w-7 rounded-lg text-[10px] font-bold flex items-center justify-center", isToday ? "bg-accent-green text-white" : "hover:bg-zinc-50")}>{d}</button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </>
             )}
           </AnimatePresence>
         </div>
       </header>
 
-      <div className="flex overflow-x-auto no-scrollbar snap-x snap-mandatory border-b border-zinc-50">
+      <div ref={carouselRef} className="flex overflow-x-auto no-scrollbar snap-x snap-mandatory border-b border-zinc-50 transition-all scroll-smooth">
         {Array.from({ length: 4 }).map((_, weekIdx) => (
           <div key={weekIdx} className="min-w-full flex justify-between px-4 py-6 snap-center">
             {dates.slice(weekIdx * 7, (weekIdx + 1) * 7).map((date, i) => {
               const isToday = date.toDateString() === new Date().toDateString();
               const isSelected = date.toDateString() === selectedDate.toDateString();
               return (
-                <button key={i} onClick={() => setSelectedDate(date)} className="flex flex-col items-center gap-1.5 w-10">
+                <button key={i} onClick={() => handleDateSelect(date)} className="flex flex-col items-center gap-1.5 w-10">
                   <span className={cn("text-[10px] font-black uppercase font-mono", isSelected ? "text-accent-green" : "text-zinc-300")}>{date.toLocaleDateString('en-US', { weekday: 'short' }).charAt(0)}</span>
                   <div className={cn("w-8 h-8 flex items-center justify-center rounded-xl text-sm font-bold transition-all", isSelected ? "bg-charcoal text-white" : isToday ? "text-accent-green border border-accent-green/20" : "text-zinc-500 hover:bg-zinc-50")}>{date.getDate()}</div>
                 </button>
@@ -242,14 +290,29 @@ const SchedulePage = ({ tasks, riseTime, windDownTime }) => {
   );
 };
 
-const SettingsPage = ({ userName, pages, setPages, riseTime, setRiseTime, windDownTime, setWindDownTime }) => {
+const SettingsPage = ({ userName, profile, setProfile, tasks, pages, setPages, riseTime, setRiseTime, windDownTime, setWindDownTime }) => {
   const [dataSaver, setDataSaver] = useState(false);
-  const [currency, setCurrency] = useState('ETB');
+  const [language, setLanguage] = useState('Eng (US)');
+  const [popupContent, setPopupContent] = useState(null);
 
-  const progress = { current: 75, previous: 62 };
+  // Calculate realtime performance
+  const now = new Date();
+  const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay())); // approx start of week
+  const completedThisWeek = tasks.filter(t => t.is_completed && new Date(t.created_at || t.due_date) >= startOfWeek).length;
+  const totalThisWeek = tasks.filter(t => new Date(t.created_at || t.due_date) >= startOfWeek).length;
+  const currentProgress = totalThisWeek > 0 ? Math.round((completedThisWeek / totalThisWeek) * 100) : 0;
+  const progress = { current: currentProgress, previous: 62 }; // Mocked historical
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+  };
+
+  const handleProfileImage = async () => {
+    const url = prompt("Enter a direct URL for your profile image:");
+    if (!url || !profile) return;
+    
+    setProfile({ ...profile, avatar_url: url });
+    await supabase.from('profiles').update({ avatar_url: url }).eq('id', profile.id);
   };
 
   const togglePage = async (id, currentState) => {
@@ -265,6 +328,16 @@ const SettingsPage = ({ userName, pages, setPages, riseTime, setRiseTime, windDo
   return (
     <div className="h-full px-6 pt-10 overflow-y-auto pb-48 no-scrollbar bg-white">
       <div className="flex flex-col items-center mb-12 text-center">
+        <button onClick={handleProfileImage} className="w-24 h-24 rounded-full bg-zinc-100 mb-4 overflow-hidden border-2 border-zinc-50 relative group">
+          {profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-zinc-300 font-black text-xl">{userName?.charAt(0) || 'M'}</div>
+          )}
+          <div className="absolute inset-0 bg-charcoal/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <span className="text-[10px] font-bold text-white uppercase">Edit</span>
+          </div>
+        </button>
         <h3 className="text-xl font-bold mb-1">Hi, {userName || 'Mesmer'}</h3>
         <div className="bg-accent-green/10 text-accent-green text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest">Active Workspace</div>
       </div>
@@ -355,10 +428,10 @@ const SettingsPage = ({ userName, pages, setPages, riseTime, setRiseTime, windDo
           <div className="p-5 apple-card bg-zinc-50 border-none flex justify-between items-center">
             <div className="flex items-center gap-3">
               <Globe size={18} className="text-zinc-400" />
-              <span className="text-sm font-bold">Currency</span>
+              <span className="text-sm font-bold">Language</span>
             </div>
-            <select value={currency} onChange={e => setCurrency(e.target.value)} className="bg-transparent text-xs font-bold border-none outline-none focus:ring-0">
-              <option>ETB</option><option>USD</option><option>EUR</option>
+            <select value={language} onChange={e => setLanguage(e.target.value)} disabled className="bg-transparent text-xs font-bold border-none outline-none focus:ring-0 opacity-50 cursor-not-allowed">
+              <option>Eng (US)</option>
             </select>
           </div>
         </div>
@@ -369,11 +442,11 @@ const SettingsPage = ({ userName, pages, setPages, riseTime, setRiseTime, windDo
         <div className="space-y-2">
           {[
             { label: 'Notifications', icon: Bell, type: 'toggle' },
-            { label: 'Privacy Policy', icon: Shield },
-            { label: 'Contact Support', icon: HelpCircle },
-            { label: 'About Mesmer', icon: Info },
+            { label: 'Privacy Policy', icon: Shield, action: () => setPopupContent({ title: 'Privacy Policy', text: 'All data is encrypted via Supabase Row Level Security. Data is scoped strictly to our authenticated tokens. We do not sell or inspect user tasks.', isContact: false }) },
+            { label: 'Contact Support', icon: HelpCircle, action: () => setPopupContent({ title: 'Contact Support', text: 'Need help? Experiencing a bug? Reach out to us directly.', isContact: true }) },
+            { label: 'About Mesmer', icon: Info, action: () => setPopupContent({ title: 'About Mesmer', text: 'Mesmer is a high-performance productivity tool designed for the ruthless professional. Build structure, measure output.', isContact: false }) },
           ].map(btn => (
-            <div key={btn.label} className="p-5 apple-card bg-zinc-50 border-none flex justify-between items-center">
+            <div key={btn.label} onClick={btn.action} className={cn("p-5 apple-card bg-zinc-50 border-none flex justify-between items-center", btn.action && "cursor-pointer active:scale-[0.98] transition-all")}>
               <div className="flex items-center gap-3">
                 <btn.icon size={18} className="text-zinc-400" />
                 <span className="text-sm font-bold">{btn.label}</span>
@@ -391,6 +464,24 @@ const SettingsPage = ({ userName, pages, setPages, riseTime, setRiseTime, windDo
           <LogOut size={16} /> Log Out
         </button>
       </div>
+
+      <AnimatePresence>
+        {popupContent && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[250] bg-charcoal/40 backdrop-blur-sm flex items-end" onClick={() => setPopupContent(null)}>
+            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="w-full bg-white rounded-t-[40px] p-8 pb-12 shadow-2xl relative max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <button onClick={() => setPopupContent(null)} className="absolute top-6 right-6 p-2 bg-zinc-50 rounded-full"><X size={20} /></button>
+              <h3 className="text-2xl font-bold mb-4 pr-12">{popupContent.title}</h3>
+              <p className="text-sm font-medium text-zinc-500 leading-relaxed max-w-md">{popupContent.text}</p>
+              {popupContent.isContact && (
+                <div className="mt-8 space-y-4">
+                  <a href="mailto:support@mesmer.app" className="block w-full py-4 bg-charcoal text-white rounded-2xl font-bold text-sm tracking-widest uppercase shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all text-center">Send Email</a>
+                  <a href="https://t.me/mesmer" target="_blank" rel="noreferrer" className="block w-full py-4 bg-[#229ED9] text-white rounded-2xl font-bold text-sm tracking-widest uppercase shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all text-center text-white/90">Telegram / @mesmer</a>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -506,8 +597,13 @@ export default function App() {
   const [swipeIndex, setSwipeIndex] = useState(0);
   const [tasks, setTasks] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
+  const [sortOrder, setSortOrder] = useState('default');
+  const [showSortModal, setShowSortModal] = useState(false);
+  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
+  const [workspaceInput, setWorkspaceInput] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const [pages, setPages] = useState([]);
   const [riseTime, setRiseTime] = useState('05:45');
@@ -515,25 +611,36 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      if (session) {
-        await handleSession(session);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        setSession(session);
+        if (session) {
+          await handleSession(session);
+        }
+      } catch (err) {
+        console.error("Supabase init error:", err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      if (session) {
-        await handleSession(session);
-      } else {
-        setTasks([]);
-        setPages([]);
-        setProfile(null);
+      try {
+        setSession(session);
+        if (session) {
+          await handleSession(session);
+        } else {
+          setTasks([]);
+          setPages([]);
+          setProfile(null);
+        }
+      } catch (err) {
+        console.error("Auth state change error:", err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -614,6 +721,7 @@ export default function App() {
       subtasks: subtasksData?.filter(s => s.task_id === task.id) || []
     })) || [];
 
+    console.log('Retrieved Tasks:', tasksWithSubtasks);
     setTasks(tasksWithSubtasks);
   };
 
@@ -623,18 +731,39 @@ export default function App() {
   ], [pages]);
 
   const currentFilteredTasks = useMemo(() => {
+    let filtered = tasks;
     const pageObj = activePages[swipeIndex] || activePages[0];
-    const pageName = pageObj.name;
-    if (pageName === 'Main') return tasks;
-    return tasks.filter(t => t.tag_name === pageName || (pageName.includes('Work') && t.tag_name === 'Coding'));
-  }, [tasks, swipeIndex, activePages]);
+    if (pageObj && pageObj.name !== 'Main') {
+      filtered = tasks.filter(t => t.tag_name === pageObj.name || (pageObj.name.includes('Work') && t.tag_name === 'Coding'));
+    }
+    
+    if (sortOrder === 'priority') {
+      const pMap = { high: 1, medium: 2, low: 3 };
+      filtered = [...filtered].sort((a, b) => (pMap[a.priority?.toLowerCase()] || 4) - (pMap[b.priority?.toLowerCase()] || 4));
+    } else if (sortOrder === 'date') {
+      filtered = [...filtered].sort((a, b) => {
+        if (!a.due_date && !b.due_date) return 0;
+        if (!a.due_date) return 1;
+        if (!b.due_date) return -1;
+        return new Date(a.due_date) - new Date(b.due_date);
+      });
+    }
+    
+    return filtered;
+  }, [tasks, swipeIndex, activePages, sortOrder]);
 
   const toggleTask = async (id) => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
 
     const newDone = !task.is_completed;
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, is_completed: newDone } : t));
+    
+    // Cascading Done
+    setTasks(prev => prev.map(t => 
+      t.id === id 
+        ? { ...t, is_completed: newDone, subtasks: newDone ? t.subtasks.map(s => ({ ...s, is_completed: true })) : t.subtasks } 
+        : t
+    ));
 
     const { error } = await supabase
       .from('tasks')
@@ -643,7 +772,35 @@ export default function App() {
 
     if (error) {
       console.error('Error updating task:', error);
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, is_completed: !newDone } : t));
+      fetchData(session.user.id);
+    } else {
+      if (newDone && task.subtasks?.length > 0) {
+        await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', id);
+      }
+      
+      // Recurrence Check: Spawn next instance if repeating
+      if (newDone && task.recurrence_type && ['Daily', 'Weekly', 'Monthly'].includes(task.recurrence_type) && task.due_date) {
+        const { id: oldId, created_at, is_completed, subtasks, ...rest } = task;
+        const newDate = new Date(task.due_date);
+        
+        if (task.recurrence_type === 'Daily') newDate.setDate(newDate.getDate() + 1);
+        if (task.recurrence_type === 'Weekly') newDate.setDate(newDate.getDate() + 7);
+        if (task.recurrence_type === 'Monthly') newDate.setMonth(newDate.getMonth() + 1);
+        
+        const newDateStr = newDate.toISOString().split('T')[0];
+        
+        const { error: spawnError } = await supabase.from('tasks').insert([{ ...rest, due_date: newDateStr, is_completed: false }]);
+        if (!spawnError) fetchData(session.user.id);
+      }
+    }
+  };
+
+  const deleteTask = async (id) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (error) {
+      console.error('Error deleting task:', error);
+      fetchData(session?.user?.id);
     }
   };
 
@@ -693,22 +850,67 @@ export default function App() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     
-    // Standardize task data for new schema
-    const { tags, ...rest } = taskData;
+    const { 
+      id, title, priority, color, is_completed, 
+      recurrence, custom_days, tags, date, time, location,
+      subtasks
+    } = taskData;
+    
     const finalTaskData = {
-      ...rest,
+      title,
+      priority,
+      color,
+      is_completed,
+      recurrence_type: recurrence,
+      custom_days,
       user_id: user.id,
-      tag_name: tags?.[0]?.name || null // Simplified tag handling for new schema
+      tag_name: tags?.[0]?.name || null,
+      due_date: date || null,
+      due_time: time || null,
+      location_data: location ? { address: location } : null,
+      deadline_passed: false 
     };
 
+    if (id) finalTaskData.id = id;
+    const tempId = id || ('temp-' + Date.now()); 
+
+    // Optimistic UI Update
+    const optimisticTask = { 
+       ...finalTaskData, 
+       id: tempId, 
+       subtasks: subtasks || []
+    };
+    
+    if (id) {
+      setTasks(prev => prev.map(t => t.id === id ? optimisticTask : t));
+    } else {
+      setTasks(prev => [optimisticTask, ...prev]);
+    }
+
+    // Perform Supabase Operation
     const { data, error } = await supabase
       .from('tasks')
-      .insert([finalTaskData])
-      .select();
+      .upsert([finalTaskData])
+      .select()
+      .single();
 
     if (error) {
-      console.error('Error adding task:', error);
+      console.error('Error adding/updating task:', error.message, error.details);
+      fetchData(user.id); // Revert UI
     } else {
+      // Background Subtask Insertions
+      if (subtasks && subtasks.length > 0) {
+        const subtasksToInsert = subtasks.filter(s => s.id.startsWith('temp-')).map(s => ({
+          title: s.title,
+          task_id: data.id,
+          user_id: user.id,
+          is_completed: s.is_completed
+        }));
+        
+        if (subtasksToInsert.length > 0) {
+          await supabase.from('subtasks').insert(subtasksToInsert);
+        }
+      }
       fetchData(user.id);
     }
   };
@@ -718,30 +920,44 @@ export default function App() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { error } = await supabase
+    const { data: newTasks, error } = await supabase
       .from('tasks')
       .insert([{ ...rest, title: `${task.title} (Copy)`, is_completed: false, user_id: user.id }])
       .select();
 
-    if (error) console.error('Error duplicating task:', error);
-    else fetchData(user.id);
+    if (error) {
+      console.error('Error duplicating task:', error);
+    } else if (newTasks && newTasks.length > 0) {
+      // Also duplicate its subtasks
+      if (subtasks && subtasks.length > 0) {
+        const subtasksToInsert = subtasks.map(s => ({
+          title: s.title,
+          task_id: newTasks[0].id,
+          user_id: user.id,
+          is_completed: false
+        }));
+        await supabase.from('subtasks').insert(subtasksToInsert);
+      }
+      fetchData(user.id);
+    }
   };
 
-  const addSwipePage = async () => {
-    const name = prompt('Enter page name:');
-    if (!name) return;
-    const color = prompt('Enter tailwind color (e.g. bg-blue-500) or leave blank for default:');
-    
+  const handleAddWorkspace = async () => {
+    if (!workspaceInput.trim()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     const { data, error } = await supabase
       .from('swipe_pages')
-      .insert([{ name, color: color || 'bg-zinc-800', user_id: user.id, is_active: true }])
+      .insert([{ name: workspaceInput.trim(), color: 'bg-zinc-800', user_id: user.id, is_active: true }])
       .select();
 
     if (error) console.error('Error adding page:', error);
-    else fetchData(user.id);
+    else {
+      setWorkspaceInput('');
+      setShowWorkspaceModal(false);
+      fetchData(user.id);
+    }
   };
 
   const completeOnboarding = async (name, role = 'Personal') => {
@@ -795,17 +1011,20 @@ export default function App() {
             <button onClick={() => setShowMenu(!showMenu)} className="w-10 h-10 flex items-center justify-center bg-zinc-50 rounded-full"><MoreVertical size={20} /></button>
             <AnimatePresence>
               {showMenu && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute right-0 top-12 bg-white apple-card border border-zinc-100 shadow-2xl p-2 z-[60] w-48">
-                  {[
-                    { label: 'Refresh', icon: RefreshCw, action: () => fetchData(session.user.id) },
-                    { label: 'New Swipe Page', icon: Layout, action: addSwipePage },
-                    { label: isSelectMode ? 'Cancel Selection' : 'Select Tasks', icon: CheckSquare, action: () => setIsSelectMode(!isSelectMode) }
-                  ].map(item => (
-                    <button key={item.label} onClick={() => { item.action?.(); setShowMenu(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-50 text-sm font-semibold transition-colors">
-                      <item.icon size={16} className="text-zinc-400" /> {item.label}
-                    </button>
-                  ))}
-                </motion.div>
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute right-0 top-12 bg-white apple-card border border-zinc-100 shadow-2xl p-2 z-[60] w-48">
+                    {[
+                      { label: 'Sort By', icon: Search, action: () => setShowSortModal(true) },
+                      { label: 'Manage Workspaces', icon: Layout, action: () => setShowWorkspaceModal(true) },
+                      { label: isSelectMode ? 'Cancel Selection' : 'Select Tasks', icon: CheckSquare, action: () => { setIsSelectMode(!isSelectMode); setSelectedTaskIds([]); } }
+                    ].map(item => (
+                      <button key={item.label} onClick={() => { item.action?.(); setShowMenu(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-zinc-50 text-sm font-semibold transition-colors">
+                        <item.icon size={16} className="text-zinc-400" /> {item.label}
+                      </button>
+                    ))}
+                  </motion.div>
+                </>
               )}
             </AnimatePresence>
           </div>
@@ -829,7 +1048,7 @@ export default function App() {
               ) : (
                 <div className="pt-4">
                   {currentFilteredTasks.map(task => (
-                    <TaskCard key={task.id} task={task} onToggle={toggleTask} onToggleSubtask={toggleSubtask} onDuplicate={duplicateTask} isSelectMode={isSelectMode} isSelected={selectedTaskIds.includes(task.id)} onSelect={(id) => setSelectedTaskIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
+                    <TaskCard key={task.id} task={task} onToggle={toggleTask} onToggleSubtask={toggleSubtask} onDuplicate={duplicateTask} onEdit={(t) => { setEditingTask(t); setIsModalOpen(true); }} onDelete={deleteTask} isSelectMode={isSelectMode} isSelected={selectedTaskIds.includes(task.id)} onSelect={(id) => setSelectedTaskIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
                   ))}
                 </div>
               )}
@@ -837,9 +1056,38 @@ export default function App() {
           )}
           {activeTab === 'Schedule' && <SchedulePage tasks={tasks} riseTime={riseTime} windDownTime={windDownTime} />}
           {activeTab === 'AI' && <AIPage />}
-          {activeTab === 'Settings' && <SettingsPage userName={userName} onReset={() => { localStorage.clear(); window.location.reload(); }} pages={pages} setPages={setPages} riseTime={riseTime} setRiseTime={setRiseTime} windDownTime={windDownTime} setWindDownTime={setWindDownTime} />}
+          {activeTab === 'Settings' && <SettingsPage userName={userName} profile={profile} setProfile={setProfile} tasks={tasks} pages={pages} setPages={setPages} riseTime={riseTime} setRiseTime={setRiseTime} windDownTime={windDownTime} setWindDownTime={setWindDownTime} />}
         </AnimatePresence>
       </main>
+
+      <AnimatePresence>
+        {isSelectMode && selectedTaskIds.length > 0 && (
+          <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="absolute bottom-28 left-4 right-4 z-[90] bg-charcoal text-white rounded-[24px] shadow-2xl p-4 flex justify-between items-center px-6">
+            <span className="text-xs font-black uppercase tracking-widest">{selectedTaskIds.length} Selected</span>
+            <div className="flex gap-2">
+              <button onClick={() => {
+                 selectedTaskIds.forEach(id => toggleTask(id));
+                 setIsSelectMode(false);
+                 setSelectedTaskIds([]);
+              }} className="text-[10px] font-black uppercase tracking-widest px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl transition-all">Done</button>
+              <button onClick={async () => {
+                 const ws = prompt('Enter exact Workspace name to move tasks to:');
+                 if (ws) {
+                   await Promise.all(selectedTaskIds.map(id => supabase.from('tasks').update({ tag_name: ws }).eq('id', id)));
+                   fetchData(session?.user?.id);
+                   setIsSelectMode(false);
+                   setSelectedTaskIds([]);
+                 }
+              }} className="text-[10px] font-black uppercase tracking-widest px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl transition-all">Move</button>
+              <button onClick={() => {
+                 selectedTaskIds.forEach(id => deleteTask(id));
+                 setIsSelectMode(false);
+                 setSelectedTaskIds([]);
+              }} className="text-[10px] font-black uppercase tracking-widest px-4 py-2.5 bg-red-500 hover:bg-red-600 rounded-xl transition-all">Delete</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="absolute bottom-0 left-0 right-0 z-50">
         {activeTab === 'ToDo' && (
@@ -849,7 +1097,7 @@ export default function App() {
         )}
         {activeTab !== 'AI' && !isSelectMode && (
           <div className="absolute -top-20 right-6">
-            <button onClick={() => setIsModalOpen(true)} className="w-14 h-14 bg-charcoal text-white flex items-center justify-center rounded-[20px] shadow-2xl shadow-charcoal/30 active:scale-95 transition-transform"><Plus size={28} /></button>
+            <button onClick={() => { setEditingTask(null); setIsModalOpen(true); }} className="w-14 h-14 bg-charcoal text-white flex items-center justify-center rounded-[20px] shadow-2xl shadow-charcoal/30 active:scale-95 transition-transform"><Plus size={28} /></button>
           </div>
         )}
         <nav className="bg-white/90 backdrop-blur-xl border-t border-zinc-100 flex justify-between px-8 pt-4 pb-10">
@@ -868,7 +1116,36 @@ export default function App() {
       </div>
 
       <AnimatePresence>
-        {isModalOpen && <AddTaskModal onClose={() => setIsModalOpen(false)} onAdd={addTask} availableTags={activePages.map(p => p.name)} />}
+        {isModalOpen && <AddTaskModal onClose={() => setIsModalOpen(false)} onAdd={addTask} availableTags={activePages.map(p => p.name)} initialData={editingTask} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSortModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] bg-charcoal/40 backdrop-blur-sm flex items-end px-4 pb-4" onClick={() => setShowSortModal(false)}>
+            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="w-full bg-white rounded-[32px] p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">Sort Objectives By</h3>
+              <div className="space-y-2">
+                {['default', 'priority', 'date'].map(s => (
+                  <button key={s} onClick={() => { setSortOrder(s); setShowSortModal(false); }} className={cn("w-full text-left px-4 py-3 rounded-xl font-bold text-sm capitalize transition-all", sortOrder === s ? "bg-accent-green text-white" : "bg-zinc-50 text-zinc-600 hover:bg-zinc-100")}>
+                    {s === 'default' ? 'Creation Order (Default)' : s === 'date' ? 'Due Date' : 'Priority'}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showWorkspaceModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] bg-charcoal/40 backdrop-blur-sm flex items-end px-4 pb-4" onClick={() => setShowWorkspaceModal(false)}>
+            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="w-full bg-white rounded-[32px] p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">New Workspace</h3>
+              <input autoFocus value={workspaceInput} onChange={e => setWorkspaceInput(e.target.value)} placeholder="Workspace Name (e.g. Finance)" className="w-full bg-zinc-50 border-none p-4 rounded-xl text-sm font-bold focus:ring-2 focus:ring-accent-green mb-4" />
+              <button onClick={handleAddWorkspace} className="w-full py-4 bg-charcoal text-white rounded-2xl font-bold text-sm tracking-widest uppercase">Create</button>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );
@@ -889,40 +1166,52 @@ const AIPage = () => (
   </div>
 );
 
-const AddTaskModal = ({ onClose, onAdd, availableTags }) => {
-  const [title, setTitle] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [time, setTime] = useState('');
+const AddTaskModal = ({ onClose, onAdd, availableTags, initialData = null }) => {
+  const [title, setTitle] = useState(initialData?.title || '');
+  const [date, setDate] = useState(initialData?.due_date || new Date().toISOString().split('T')[0]);
+  const [time, setTime] = useState(initialData?.due_time || '');
   const [deadline, setDeadline] = useState('');
-  const [priority, setPriority] = useState('medium');
+  const [priority, setPriority] = useState(initialData?.priority || 'medium');
   const [reminders, setReminders] = useState(false);
-  const [location, setLocation] = useState('');
-  const [color, setColor] = useState('bg-zinc-800');
-  const [recurrence, setRecurrence] = useState('Once');
-  const [customDays, setCustomDays] = useState([]);
-  const [selectedTags, setSelectedTags] = useState([]);
+  const [location, setLocation] = useState(initialData?.location_data?.address || '');
+  const [color, setColor] = useState(initialData?.color || 'bg-zinc-800');
+  const [recurrence, setRecurrence] = useState(initialData?.recurrence_type || 'Once');
+  const [customDays, setCustomDays] = useState(initialData?.custom_days || []);
+  const [selectedTags, setSelectedTags] = useState(initialData?.tag_name ? [initialData.tag_name] : []);
+  
+  // Subtasks State
+  const [subtasks, setSubtasks] = useState(initialData?.subtasks || []);
+  const [subtaskInput, setSubtaskInput] = useState('');
 
   const daysLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const colors = ['bg-zinc-800', 'bg-emerald-500', 'bg-blue-500', 'bg-yellow-400', 'bg-red-500', 'bg-purple-500'];
 
   const toggleDay = (d) => setCustomDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
-  const toggleTag = (tagName) => setSelectedTags(prev => prev.includes(tagName) ? prev.filter(x => x !== tagName) : [...prev, tagName]);
+  const toggleTag = (tagName) => setSelectedTags([tagName]); // Only one tag allowed based on old flow
+
+  const handleAddSubtask = (e) => {
+    if (e.key === 'Enter' && subtaskInput.trim()) {
+      e.preventDefault();
+      setSubtasks([...subtasks, { id: 'temp-' + Date.now(), title: subtaskInput.trim(), is_completed: false }]);
+      setSubtaskInput('');
+    }
+  };
 
   const handleAdd = () => {
     if (!title) return;
     onAdd({
+      id: initialData?.id,
       title,
       date,
       time,
-      deadline,
       priority,
-      reminders,
-      location,
       color,
       recurrence,
       custom_days: customDays,
-      is_completed: false,
-      tags: selectedTags.map(name => ({ name, color: 'bg-zinc-400' }))
+      is_completed: initialData?.is_completed || false,
+      tags: selectedTags.map(name => ({ name })),
+      location,
+      subtasks: subtasks.filter(s => s.title.trim() !== '')
     });
     onClose();
   };
@@ -931,12 +1220,33 @@ const AddTaskModal = ({ onClose, onAdd, availableTags }) => {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-charcoal/40 backdrop-blur-md flex items-end px-4 pb-4" onClick={onClose}>
       <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="w-full bg-white rounded-[40px] p-8 pb-12 max-w-md mx-auto shadow-2xl relative overflow-y-auto no-scrollbar max-h-[90vh]" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-8">
-          <h3 className="text-xl font-bold">New Objective</h3>
+          <h3 className="text-xl font-bold">{initialData ? 'Edit Objective' : 'New Objective'}</h3>
           <button onClick={onClose} className="p-2 bg-zinc-50 rounded-full"><X size={20} /></button>
         </div>
 
         <div className="space-y-6">
           <input autoFocus placeholder="Task Title" value={title} onChange={e => setTitle(e.target.value)} className="w-full text-2xl font-bold border-none p-0 focus:ring-0 bg-transparent" />
+
+          {/* Subtasks UI */}
+          <div className="space-y-3 bg-zinc-50/50 p-4 rounded-3xl border border-zinc-100">
+            <div className="flex justify-between items-center">
+               <label className="text-[9px] font-black uppercase text-zinc-400">Subtasks</label>
+               <button onClick={() => setSubtasks([...subtasks, { id: 'temp-' + Date.now(), title: '', is_completed: false }])} className="text-[9px] font-black text-accent-green bg-accent-green/10 px-2 py-1 rounded-lg uppercase tracking-widest flex items-center"><Plus size={10} className="mr-1" />Add</button>
+            </div>
+            <div className="space-y-2 relative pl-2">
+              {subtasks.length > 0 && <div className="absolute left-0 top-2 bottom-2 w-0.5 bg-zinc-200 rounded-full" />}
+              {subtasks.map(sub => (
+                <div key={sub.id} className="flex items-center gap-2 relative z-10 pl-2">
+                   <div className="w-4 h-4 rounded-full border-2 border-zinc-300 bg-white shadow-sm flex items-center justify-center">
+                      {sub.is_completed && <div className="w-2 h-2 rounded-full bg-accent-green" />}
+                   </div>
+                   <input autoFocus={sub.title === ''} value={sub.title} onChange={e => setSubtasks(subtasks.map(s => s.id === sub.id ? { ...s, title: e.target.value } : s))} placeholder="Enter subtask..." className="flex-1 bg-white border border-zinc-100 p-2.5 rounded-xl text-xs font-bold focus:ring-1 focus:ring-accent-green transition-all shadow-sm" />
+                   <button onClick={() => setSubtasks(subtasks.filter(s => s.id !== sub.id))} className="text-zinc-300 hover:text-red-400 p-2"><X size={14} /></button>
+                </div>
+              ))}
+              {subtasks.length === 0 && <p className="text-[10px] text-zinc-400 font-bold ml-2">No subtasks added.</p>}
+            </div>
+          </div>
 
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase text-zinc-300">Tags</label>
@@ -951,8 +1261,6 @@ const AddTaskModal = ({ onClose, onAdd, availableTags }) => {
             <div className="space-y-1.5"><label className="text-[9px] font-black uppercase text-zinc-300">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-zinc-50 p-3 rounded-xl border-none text-xs font-bold" /></div>
             <div className="space-y-1.5"><label className="text-[9px] font-black uppercase text-zinc-300">Time</label><input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full bg-zinc-50 p-3 rounded-xl border-none text-xs font-bold" /></div>
           </div>
-
-          <div className="space-y-1.5"><label className="text-[9px] font-black uppercase text-zinc-300">Deadline</label><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full bg-zinc-50 p-3 rounded-xl border-none text-xs font-bold" /></div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
@@ -995,7 +1303,7 @@ const AddTaskModal = ({ onClose, onAdd, availableTags }) => {
           </div>
         </div>
 
-        <button onClick={handleAdd} className="w-full bg-charcoal text-white py-4 rounded-[22px] font-bold text-sm tracking-widest uppercase mt-8 hover:scale-[1.02] active:scale-[0.98] transition-all">Activate Task</button>
+        <button onClick={handleAdd} className="w-full bg-charcoal text-white py-4 rounded-[22px] font-bold text-sm tracking-widest uppercase mt-8 hover:scale-[1.02] active:scale-[0.98] transition-all">{initialData ? 'Save Objective' : 'Activate Task'}</button>
       </motion.div>
     </motion.div>
   );
