@@ -12,6 +12,12 @@ export default function AuthPage() {
 
   const handleAuth = async (e) => {
     e.preventDefault();
+    
+    if (!supabase || !supabase.auth) { 
+      alert('System connection error. Please refresh or check connection.'); 
+      return; 
+    }
+
     setLoading(true);
     setError(null);
 
