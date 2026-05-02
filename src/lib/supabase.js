@@ -1,8 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Using process.env as requested by the user, and import.meta.env for Vite
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+console.log('VITE_URL_EXISTS:', !!(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL));
+
+const getEnv = (key) => {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) return import.meta.env[key];
+  if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key];
+  if (typeof window !== 'undefined' && window.ENV_VARS && window.ENV_VARS[key]) return window.ENV_VARS[key];
+  return '';
+};
+
+const rawUrl = getEnv('VITE_SUPABASE_URL') || getEnv('NEXT_PUBLIC_SUPABASE_URL');
+const rawKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
 
 // Remove quotes, whitespace, and ensure it is a string
 const supabaseUrl = rawUrl.replace(/['"]+/g, '').trim();
