@@ -1,7 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+// const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const supabaseUrl = "https://sqdezzxbhrmaztropgwc.supabase.co"
+const supabaseAnonKey = "sb_publishable_5WpJOiUfHz9sz-9m7exs_g_7N3PSaDk"
 
 // Diagnostic Logging for Production
 console.log('--- Supabase Diagnostic ---');
