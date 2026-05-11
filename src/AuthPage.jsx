@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { supabase } from './lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, Mail, Lock, ArrowRight, Activity, ShieldCheck } from 'lucide-react';
@@ -22,7 +22,7 @@ export default function AuthPage() {
     setError(null);
 
     try {
-      const { data, error: authError } = isSignUp 
+      const { error: authError } = isSignUp 
         ? await supabase.auth.signUp({ 
             email, 
             password,

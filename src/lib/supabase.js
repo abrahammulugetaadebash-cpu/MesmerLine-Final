@@ -18,6 +18,10 @@ const supabaseKey = rawKey.replace(/['"]+/g, '').trim();
 
 if (!supabaseUrl || !supabaseKey) {
   console.error('Supabase env vars missing at runtime');
+} else {
+  console.log('Diagnostic - URL Length:', supabaseUrl.length);
+  console.log('Diagnostic - Key Length:', supabaseKey.length);
+  console.log('Diagnostic - URL Starts with http:', supabaseUrl.startsWith('http'));
 }
 
 export const supabase = (supabaseUrl && supabaseKey && supabaseUrl.startsWith('http')) 
