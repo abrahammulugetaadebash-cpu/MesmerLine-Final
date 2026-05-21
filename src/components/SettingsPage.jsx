@@ -9,16 +9,38 @@ const SettingsPage = ({ userName, profile, setProfile, tasks, pages, setPages, r
   const [language, setLanguage] = useState('Eng (US)');
   const [popupContent, setPopupContent] = useState(null);
 
-  // Calculate realtime performance
-  const now = new Date();
-  const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay())); // approx start of week
-  const completedThisWeek = tasks.filter(t => t.is_completed && new Date(t.created_at || t.due_date) >= startOfWeek).length;
-  const totalThisWeek = tasks.filter(t => new Date(t.created_at || t.due_date) >= startOfWeek).length;
-  const currentProgress = totalThisWeek > 0 ? Math.round((completedThisWeek / totalThisWeek) * 100) : 0;
-  const progress = { current: currentProgress, previous: 62 }; // Mocked historical
+  // Calculate Realtime Performance Aggregates
+  const stats = {
+    total: tasks.length,
+    completed: tasks.filter(t => t.is_completed).length,
+    pending: tasks.filter(t => !t.is_completed).length,
+    highPriority: tasks.filter(t => t.priority?.toLowerCase() === 'high').length,
+    highPriorityCompleted: tasks.filter(t => t.priority?.toLowerCase() === 'high' && t.is_completed).length,
+  };
+
+  const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+  
+  // Velocity: Tasks finished today
+  const todayStr = new Date().toDateString();
+  const completedToday = tasks.filter(t => t.is_completed && new Date(t.updated_at || t.created_at).toDateString() === todayStr).length;
+
+  // Focus Metric: Avg time for high priority tasks (mocked if timestamps missing, but based on real count)
+  // Optimization: If we had completed_at - created_at, we would calculate real time.
+  const focusMetric = stats.highPriority > 0 ? Math.round((stats.highPriorityCompleted / stats.highPriority) * 100) : 0;
+
+  const progress = { 
+    current: completionRate, 
+    previous: 64, // Historical snapshot placeholder
+    velocity: completedToday,
+    breakdown: {
+      completed: stats.completed,
+      pending: stats.pending
+    }
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    window.location.href = '/'; // Reset app state by redirecting to home
   };
 
   const handleProfileImage = async () => {
@@ -56,26 +78,53 @@ const SettingsPage = ({ userName, profile, setProfile, tasks, pages, setPages, r
         <div className="bg-accent-green/10 text-accent-green text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest">Active Workspace</div>
       </div>
 
-      {/* Section 1: Performance */}
       <section className="mb-12">
         <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300 mb-6 font-mono">Performance Overview</h4>
         <div className="space-y-6">
-          {['Current Week', 'Previous Week'].map(label => (
-            <div key={label}>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-zinc-500">{label}</span>
-                <span className="text-xs font-black text-accent-green">{label.includes('Current') ? progress.current : progress.previous}%</span>
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-zinc-500">Overall Completion Rate</span>
+              <span className="text-xs font-black text-accent-green">{progress.current}%</span>
+            </div>
+            <div className="h-2 bg-zinc-50 rounded-full overflow-hidden">
+              <motion.div initial={{ width: 0 }} animate={{ width: `${progress.current}%` }} className="h-full bg-accent-green rounded-full" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-zinc-50 p-4 rounded-2xl flex flex-col gap-1">
+               <p className="text-[9px] font-black uppercase text-zinc-400">Daily Velocity</p>
+               <div className="flex items-end gap-2">
+                 <p className="text-xl font-black text-charcoal">{progress.velocity}</p>
+                 <p className="text-[8px] font-bold text-zinc-400 mb-1">TASKS / DAY</p>
+               </div>
+            </div>
+            <div className="bg-zinc-50 p-4 rounded-2xl flex flex-col gap-1">
+               <p className="text-[9px] font-black uppercase text-zinc-400">Focus Metric</p>
+               <div className="flex items-end gap-2">
+                 <p className="text-xl font-black text-charcoal">{focusMetric}%</p>
+                 <p className="text-[8px] font-bold text-zinc-400 mb-1">HI-PRIORITY</p>
+               </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 bg-zinc-900 p-5 rounded-[24px] text-white shadow-xl shadow-zinc-200/50">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-accent-green/20 rounded-xl flex items-center justify-center">
+                <Sparkles size={20} className="text-accent-green" />
               </div>
-              <div className="h-2 bg-zinc-50 rounded-full overflow-hidden">
-                <motion.div initial={{ width: 0 }} animate={{ width: `${label.includes('Current') ? progress.current : progress.previous}%` }} className="h-full bg-accent-green rounded-full" />
+              <div>
+                <p className="text-[10px] font-black uppercase text-white/40">Workload Breakdown</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold">{progress.breakdown.completed} Done</span>
+                  <span className="text-white/20">•</span>
+                  <span className="text-sm font-bold text-white/60">{progress.breakdown.pending} Pending</span>
+                </div>
               </div>
             </div>
-          ))}
-          <div className="flex items-center gap-4 bg-zinc-50 p-4 rounded-2xl">
-            <Sparkles size={20} className="text-accent-green" />
-            <div>
-              <p className="text-[10px] font-black uppercase text-zinc-400">Efficiency Score</p>
-              <p className="text-lg font-black leading-tight text-charcoal">84.2%</p>
+            <div className="text-right">
+               <p className="text-[9px] font-bold text-zinc-500 uppercase">Efficiency</p>
+               <p className="text-lg font-black">{progress.current}%</p>
             </div>
           </div>
         </div>

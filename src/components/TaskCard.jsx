@@ -3,20 +3,28 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MoreVertical, CheckCircle2, Circle, Copy, Trash, CheckSquare, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, onSelect, onDuplicate, onEdit, onDelete }) => {
+const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, onSelect, onDuplicate, onEdit, onDelete, isAnimating, animatingSubtasks }) => {
   const [showOptions, setShowOptions] = useState(false);
   
   // Logic for the Reddish overdue tint
   const isOverdue = !task.is_completed && task.due_date && new Date(`${task.due_date} ${task.due_time || '00:00'}`) < new Date();
   const isToday = task.due_date && new Date(task.due_date).toDateString() === new Date().toDateString();
 
+  const isVisuallyCompleted = task.is_completed || isAnimating;
+
   return (
     <motion.div
       layout
+      initial={false}
+      animate={{ 
+        scale: isAnimating ? 0.98 : 1,
+        opacity: isAnimating ? 0.6 : (task.is_completed ? 0.8 : 1)
+      }}
+      transition={{ duration: 0.4, ease: [0.32, 0, 0.67, 1] }} 
       className={cn(
-        "apple-card p-4 mb-4 relative overflow-hidden transition-all duration-500",
+        "apple-card p-4 mb-4 relative overflow-hidden transition-colors duration-500",
         // Visual State Sync: Greenish/Darkened when completed, Reddish when overdue
-        task.is_completed ? "bg-emerald-50/80 border-emerald-100 opacity-80" : isOverdue ? "bg-red-50/80 border-red-100" : isToday ? "bg-orange-50/30 border-orange-100/50" : "bg-white border-zinc-100",
+        isVisuallyCompleted ? "bg-emerald-50/70 border-emerald-100" : isOverdue ? "bg-red-50/80 border-red-100" : isToday ? "bg-orange-50/30 border-orange-100/50" : "bg-white border-zinc-100",
         isSelected && "ring-2 ring-charcoal"
       )}
       onClick={() => isSelectMode && onSelect(task.id)}
@@ -26,13 +34,13 @@ const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, o
       <div className="flex items-start gap-3">
         {!isSelectMode && (
           <button onClick={(e) => { e.stopPropagation(); onToggle(task.id); }} className="mt-0.5">
-            {task.is_completed ? <CheckCircle2 size={20} className="text-accent-green" /> : <Circle size={20} className="text-zinc-300" />}
+            {isVisuallyCompleted ? <CheckCircle2 size={20} className="text-accent-green" /> : <Circle size={20} className="text-zinc-300" />}
           </button>
         )}
 
         <div className="flex-1">
           <div className="flex justify-between items-start">
-            <h3 className={cn("text-sm font-bold tracking-tight mb-2 transition-all duration-500", task.is_completed && "line-through text-zinc-400 font-medium")}>{task.title}</h3>
+            <h3 className={cn("text-sm font-bold tracking-tight mb-2 transition-all duration-400", isVisuallyCompleted && "line-through text-zinc-400 font-medium")}>{task.title}</h3>
             {!isSelectMode && (
               <div className="relative">
                 <button onClick={(e) => { e.stopPropagation(); setShowOptions(!showOptions); }} className="text-zinc-300 hover:text-zinc-600">
@@ -72,15 +80,24 @@ const TaskCard = ({ task, onToggle, onToggleSubtask, isSelectMode, isSelected, o
 
           {task.subtasks?.length > 0 && (
             <div className="mt-4 space-y-3">
-              {task.subtasks.map(sub => (
-                <div key={sub.id} className="bg-zinc-50/50 border border-zinc-100 rounded-2xl p-3 flex items-start gap-3 ml-2 relative">
-                  <div className={cn("absolute left-0 top-3 bottom-3 w-0.5 rounded-full", task.priority === 'high' ? 'bg-red-400' : 'bg-zinc-300')} />
-                  <button onClick={(e) => { e.stopPropagation(); onToggleSubtask(task.id, sub.id); }} className="mt-0.5">
-                    {sub.is_completed ? <CheckCircle2 size={16} className="text-accent-green" /> : <Circle size={16} className="text-zinc-300" />}
-                  </button>
-                  <span className={cn("text-xs font-bold transition-all duration-500", sub.is_completed ? "line-through text-zinc-400 font-medium opacity-50" : "")}>{sub.title}</span>
-                </div>
-              ))}
+              {task.subtasks.map(sub => {
+                const isSubAnimating = animatingSubtasks?.has(sub.id);
+                const isSubDone = sub.is_completed || isSubAnimating;
+
+                return (
+                  <motion.div 
+                    key={sub.id} 
+                    animate={{ scale: isSubAnimating ? 0.98 : 1, opacity: isSubAnimating ? 0.7 : 1 }}
+                    className="bg-zinc-50/50 border border-zinc-100 rounded-2xl p-3 flex items-start gap-3 ml-2 relative"
+                  >
+                    <div className={cn("absolute left-0 top-3 bottom-3 w-0.5 rounded-full", task.priority === 'high' ? 'bg-red-400' : 'bg-zinc-300')} />
+                    <button onClick={(e) => { e.stopPropagation(); onToggleSubtask(task.id, sub.id); }} className="mt-0.5">
+                      {isSubDone ? <CheckCircle2 size={16} className="text-accent-green" /> : <Circle size={16} className="text-zinc-300" />}
+                    </button>
+                    <span className={cn("text-xs font-bold transition-all duration-400", isSubDone ? "line-through text-zinc-400 font-medium opacity-50" : "")}>{sub.title}</span>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </div>

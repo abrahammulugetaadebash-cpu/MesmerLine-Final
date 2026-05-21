@@ -51,6 +51,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [forceShowApp, setForceShowApp] = useState(false);
   const [userName, setUserName] = useState('');
   const [activeTab, setActiveTab] = useState('ToDo');
   const [swipeIndex, setSwipeIndex] = useState(0);
@@ -58,6 +59,7 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [isSelectMode, setIsSelectMode] = useState(false);
+  const [animatingIds, setAnimatingIds] = useState(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
   const [sortOrder, setSortOrder] = useState('default');
   const [showSortModal, setShowSortModal] = useState(false);
@@ -104,62 +106,97 @@ export default function App() {
   }, []);
 
   const handleSession = useCallback(async (session) => {
-    let { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .single();
-
-    if (profileError && profileError.code === 'PGRST116') {
-      const { data: newProfile, error: createError } = await supabase
+    try {
+      let { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .insert([{ 
-          id: session.user.id, 
-          full_name: session.user.user_metadata?.full_name || '',
-          onboarding_completed: false 
-        }])
-        .select()
+        .select('*')
+        .eq('id', session.user.id)
         .single();
-      if (!createError) profileData = newProfile;
+
+      if (profileError && profileError.code === 'PGRST116') {
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert([{ 
+            id: session.user.id, 
+            full_name: session.user.user_metadata?.full_name || '',
+            onboarding_completed: false 
+          }])
+          .select()
+          .single();
+        if (!createError) profileData = newProfile;
+      }
+
+      setProfile(profileData || { onboarding_completed: false });
+      setUserName(profileData?.full_name || session.user.email.split('@')[0]);
+      fetchData(session.user.id);
+
+      const tasksSubscription = supabase
+        .channel('tasks-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData(session.user.id))
+        .subscribe();
+
+      const subtasksSubscription = supabase
+        .channel('subtasks-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => fetchData(session.user.id))
+        .subscribe();
+
+      return () => {
+        tasksSubscription.unsubscribe();
+        subtasksSubscription.unsubscribe();
+      };
+    } catch (err) {
+      console.error("Handle Session Error:", err);
+      setProfile({ onboarding_completed: false }); // Fallback to allow app mount
+      setLoading(false);
     }
-
-    setProfile(profileData);
-    setUserName(profileData?.full_name || session.user.email.split('@')[0]);
-    fetchData(session.user.id);
-
-    const tasksSubscription = supabase
-      .channel('tasks-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData(session.user.id))
-      .subscribe();
-
-    const subtasksSubscription = supabase
-      .channel('subtasks-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => fetchData(session.user.id))
-      .subscribe();
-
-    return () => {
-      tasksSubscription.unsubscribe();
-      subtasksSubscription.unsubscribe();
-    };
   }, [fetchData]);
 
+  // Bail-Out Switch: Break potential boot-loops
   useEffect(() => {
+    const emergencyTimer = setTimeout(() => {
+      setForceShowApp(true);
+    }, 3000);
+    return () => clearTimeout(emergencyTimer);
+  }, []);
+
+  useEffect(() => {
+    // Safety Fallback: Ensure loading never runs indefinitely
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, 3000); // 3s definitive timeout
+
     const init = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        if (error) {
+          console.error("Auth Session Error:", error);
+          // Purge corrupted session data
+          localStorage.clear();
+          throw error;
+        }
         setSession(session);
-        if (session) await handleSession(session);
+        if (session) {
+          await handleSession(session);
+        } else {
+          setLoading(false);
+        }
       } catch (err) {
         console.error("Supabase init error:", err);
-      } finally {
         setLoading(false);
       }
     };
     init();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
+        if (event === 'SIGNED_OUT') {
+           localStorage.clear();
+           setSession(null);
+           setProfile(null);
+           setLoading(false);
+           return;
+        }
+
         setSession(session);
         if (session) {
           await handleSession(session);
@@ -167,15 +204,18 @@ export default function App() {
           setTasks([]);
           setPages([]);
           setProfile(null);
+          setLoading(false);
         }
       } catch (err) {
         console.error("Auth state change error:", err);
-      } finally {
         setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, [handleSession]);
 
   const activePages = useMemo(() => [
@@ -207,34 +247,45 @@ export default function App() {
 
   const toggleTask = async (id) => {
     const task = tasks.find(t => t.id === id);
-    if (!task) return;
+    if (!task || animatingIds.has(id)) return;
 
-    const newDone = !task.is_completed;
-    setTasks(prev => prev.map(t => 
-      t.id === id 
-        ? { ...t, is_completed: newDone, subtasks: newDone ? t.subtasks.map(s => ({ ...s, is_completed: true })) : t.subtasks } 
-        : t
-    ));
+    // Trigger Kinetic Animation
+    setAnimatingIds(prev => new Set(prev).add(id));
+    
+    setTimeout(async () => {
+      const newDone = !task.is_completed;
+      setTasks(prev => prev.map(t => 
+        t.id === id 
+          ? { ...t, is_completed: newDone, subtasks: newDone ? t.subtasks.map(s => ({ ...s, is_completed: true })) : t.subtasks } 
+          : t
+      ));
 
-    const { error } = await supabase.from('tasks').update({ is_completed: newDone }).eq('id', id);
-    if (error) {
-      console.error('Error updating task:', error);
-      fetchData(session.user.id);
-    } else {
-      if (newDone && task.subtasks?.length > 0) {
-        await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', id);
+      const { error } = await supabase.from('tasks').update({ is_completed: newDone }).eq('id', id);
+      setAnimatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+
+      if (error) {
+        console.error('Error updating task:', error);
+        fetchData(session.user.id);
+      } else {
+        if (newDone && task.subtasks?.length > 0) {
+          await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', id);
+        }
+        if (newDone && task.recurrence_type && ['Daily', 'Weekly', 'Monthly'].includes(task.recurrence_type) && task.due_date) {
+          const { id: _oldId, created_at: _created_at, is_completed: _is_completed, subtasks: _subtasks, ...rest } = task;
+          const newDate = new Date(task.due_date);
+          if (task.recurrence_type === 'Daily') newDate.setDate(newDate.getDate() + 1);
+          if (task.recurrence_type === 'Weekly') newDate.setDate(newDate.getDate() + 7);
+          if (task.recurrence_type === 'Monthly') newDate.setMonth(newDate.getMonth() + 1);
+          const newDateStr = newDate.toISOString().split('T')[0];
+          await supabase.from('tasks').insert([{ ...rest, due_date: newDateStr, is_completed: false }]);
+          fetchData(session.user.id);
+        }
       }
-      if (newDone && task.recurrence_type && ['Daily', 'Weekly', 'Monthly'].includes(task.recurrence_type) && task.due_date) {
-        const { id: _oldId, created_at: _created_at, is_completed: _is_completed, subtasks: _subtasks, ...rest } = task;
-        const newDate = new Date(task.due_date);
-        if (task.recurrence_type === 'Daily') newDate.setDate(newDate.getDate() + 1);
-        if (task.recurrence_type === 'Weekly') newDate.setDate(newDate.getDate() + 7);
-        if (task.recurrence_type === 'Monthly') newDate.setMonth(newDate.getMonth() + 1);
-        const newDateStr = newDate.toISOString().split('T')[0];
-        const { error: spawnError } = await supabase.from('tasks').insert([{ ...rest, due_date: newDateStr, is_completed: false }]);
-        if (!spawnError) fetchData(session.user.id);
-      }
-    }
+    }, 400); // Wait for Kinetic Animation timeline
   };
 
   const deleteTask = async (id) => {
@@ -249,39 +300,90 @@ export default function App() {
   const toggleSubtask = async (taskId, subId) => {
     const task = tasks.find(t => t.id === taskId);
     const subtask = task?.subtasks.find(s => s.id === subId);
-    if (!subtask) return;
-    const newDone = !subtask.is_completed;
-    setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t,
-      subtasks: t.subtasks.map(s => s.id === subId ? { ...s, is_completed: newDone } : s)
-    } : t));
-    const { error } = await supabase.from('subtasks').update({ is_completed: newDone }).eq('id', subId);
-    if (error) {
-      console.error('Error updating subtask:', error);
-      fetchData(session.user.id);
-    }
+    if (!subtask || animatingIds.has(subId)) return;
+
+    // Trigger Kinetic Animation
+    setAnimatingIds(prev => new Set(prev).add(subId));
+
+    setTimeout(async () => {
+      const newDone = !subtask.is_completed;
+      setTasks(prev => prev.map(t => t.id === taskId ? {
+        ...t,
+        subtasks: t.subtasks.map(s => s.id === subId ? { ...s, is_completed: newDone } : s)
+      } : t));
+
+      const { error } = await supabase.from('subtasks').update({ is_completed: newDone }).eq('id', subId);
+      setAnimatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(subId);
+        return next;
+      });
+
+      if (error) {
+        console.error('Error updating subtask:', error);
+        fetchData(session.user.id);
+      }
+    }, 400); // Kinetic Animation delay
   };
 
   const addTask = async (taskData) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const { id, title, priority, color, is_completed, recurrence, custom_days, tags, date, time, location, subtasks } = taskData;
-    const finalTaskData = { title, priority, color, is_completed, recurrence_type: recurrence, custom_days, user_id: user.id, tag_name: tags?.[0]?.name || null, due_date: date || null, due_time: time || null, location_data: location ? { address: location } : null, deadline_passed: false };
-    if (id) finalTaskData.id = id;
+    const finalTaskData = { 
+      title, 
+      priority, 
+      color, 
+      is_completed, 
+      recurrence_type: recurrence, 
+      custom_days, 
+      user_id: user.id, 
+      tag_name: tags?.[0]?.name || null, 
+      due_date: date || null, 
+      due_time: time || null, 
+      location_data: location ? { address: location } : null,
+      deadline_passed: false 
+    };
+
+    // Optimistic UI Update
     const tempId = id || ('temp-' + Date.now()); 
     const optimisticTask = { ...finalTaskData, id: tempId, subtasks: subtasks || [] };
-    if (id) setTasks(prev => prev.map(t => t.id === id ? optimisticTask : t));
-    else setTasks(prev => [optimisticTask, ...prev]);
-    const { data, error } = await supabase.from('tasks').upsert([finalTaskData]).select().single();
-    if (error) {
-      console.error('Error adding/updating task:', error.message);
-      fetchData(user.id);
+    if (id) {
+      setTasks(prev => prev.map(t => t.id === id ? optimisticTask : t));
     } else {
+      setTasks(prev => [optimisticTask, ...prev]);
+    }
+
+    try {
+      let result;
+      if (id) {
+        result = await supabase.from('tasks').update(finalTaskData).eq('id', id).select().single();
+      } else {
+        result = await supabase.from('tasks').insert([finalTaskData]).select().single();
+      }
+
+      const { data, error } = result;
+      if (error) throw error;
+
       if (subtasks && subtasks.length > 0) {
-        const subtasksToInsert = subtasks.filter(s => s.id.startsWith('temp-')).map(s => ({ title: s.title, task_id: data.id, user_id: user.id, is_completed: s.is_completed }));
-        if (subtasksToInsert.length > 0) await supabase.from('subtasks').insert(subtasksToInsert);
+        const subtasksToInsert = subtasks
+          .filter(s => typeof s.id === 'string' && s.id.startsWith('temp-'))
+          .map(s => ({ 
+            title: s.title, 
+            task_id: data.id, 
+            user_id: user.id, 
+            is_completed: s.is_completed 
+          }));
+        
+        if (subtasksToInsert.length > 0) {
+          const { error: subError } = await supabase.from('subtasks').insert(subtasksToInsert);
+          if (subError) console.error('Error adding subtasks:', subError.message);
+        }
       }
       fetchData(user.id);
+    } catch (err) {
+      console.error('Task Sync Error:', err.message);
+      fetchData(user.id); // Rollback optimistic update
     }
   };
 
@@ -324,7 +426,7 @@ export default function App() {
     }
   };
 
-  if (loading) return (
+  if (loading && !forceShowApp) return (
     <div className="h-screen w-full flex flex-col items-center justify-center space-y-4">
       <Sparkles className="animate-spin text-accent-green" size={32} />
       <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Loading Workspace...</p>
@@ -332,6 +434,15 @@ export default function App() {
   );
 
   if (!session) return <AuthPage />;
+  
+  // Wait for profile to load before deciding to show Onboarding or App, but respect the Bail-Out Switch
+  if (!profile && !forceShowApp) return (
+    <div className="h-screen w-full flex flex-col items-center justify-center space-y-4">
+      <Sparkles className="animate-spin text-accent-green" size={32} />
+      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Verifying your identity...</p>
+    </div>
+  );
+
   if (profile && !profile.onboarding_completed) return <LandingPage onComplete={completeOnboarding} />;
 
   return (
@@ -378,7 +489,20 @@ export default function App() {
             }}>
               <div className="pt-4">
                 {currentFilteredTasks.map(task => (
-                  <TaskCard key={task.id} task={task} onToggle={toggleTask} onToggleSubtask={toggleSubtask} onDuplicate={duplicateTask} onEdit={(t) => { setEditingTask(t); setIsModalOpen(true); }} onDelete={deleteTask} isSelectMode={isSelectMode} isSelected={selectedTaskIds.includes(task.id)} onSelect={(id) => setSelectedTaskIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} />
+                  <TaskCard 
+                    key={task.id} 
+                    task={task} 
+                    onToggle={toggleTask} 
+                    onToggleSubtask={toggleSubtask} 
+                    onDuplicate={duplicateTask} 
+                    onEdit={(t) => { setEditingTask(t); setIsModalOpen(true); }} 
+                    onDelete={deleteTask} 
+                    isSelectMode={isSelectMode} 
+                    isSelected={selectedTaskIds.includes(task.id)} 
+                    onSelect={(id) => setSelectedTaskIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                    isAnimating={animatingIds.has(task.id)}
+                    animatingSubtasks={animatingIds}
+                  />
                 ))}
                 {currentFilteredTasks.length === 0 && <div className="py-20 text-center opacity-20 font-black uppercase text-[10px] tracking-widest">No Objectives Found</div>}
               </div>
